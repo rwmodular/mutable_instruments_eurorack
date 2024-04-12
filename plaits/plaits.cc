@@ -25,6 +25,7 @@
 #include <stm32f37x_conf.h>
 
 #include "plaits/drivers/audio_dac.h"
+#include "plaits/drivers/ii.h"
 #include "plaits/drivers/debug_pin.h"
 #include "plaits/drivers/debug_port.h"
 
@@ -49,6 +50,7 @@ Modulations modulations;
 Patch patch;
 Settings settings;
 Ui ui;
+II ii;
 UserData user_data;
 UserDataReceiver user_data_receiver;
 Voice voice;
@@ -79,7 +81,8 @@ void FillBuffer(AudioDac::Frame* output, size_t size) {
   IWDG_ReloadCounter();
   
   ui.Poll();
-  
+  ii.Poll();
+	
   if (test_adc_noise) {
     static float note_lp = 0.0f;
     float note = modulations.note;
@@ -159,7 +162,8 @@ void Init() {
 #endif  // PROFILE_INTERRUPT
 
   ui.Init(&patch, &modulations, &settings);
-  
+  ii.Init(&modulations);
+	
   audio_dac.Init(48000, kBlockSize);
 
   audio_dac.Start(&FillBuffer);
@@ -169,4 +173,13 @@ void Init() {
 int main(void) {
   Init();
   while (1) { }
+}
+
+
+extern "C" {
+
+void I2C1_EV_IRQHandler(void) {
+  ii.IRQHandler();
+}
+
 }
