@@ -20,6 +20,7 @@ enum Cmds {
 
 // Control Targets
 enum Ctrls {
+  II_CTL_NA,
   II_CTL_ALL,
   II_CTL_TRIGGER,
   II_CTL_LEVEL,
