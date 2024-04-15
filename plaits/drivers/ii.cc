@@ -29,7 +29,7 @@ void II::InitializeGPIO() {
   gpio_init.GPIO_Mode = GPIO_Mode_AF;
   gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
   gpio_init.GPIO_OType = GPIO_OType_OD;
-  gpio_init.GPIO_PuPd  = GPIO_PuPd_NOPULL;
+  gpio_init.GPIO_PuPd  = GPIO_PuPd_UP;
   GPIO_Init(II_I2C_GPIO, &gpio_init);
 
   // Connect pins to I2C peripheral
@@ -55,7 +55,7 @@ void II::InitializeControlInterface() {
 
   I2C_Init(II_I2C, &i2c_init);
 
-  NVIC_SetPriority(I2C1_EV_IRQn, 2);
+  NVIC_SetPriority(I2C1_EV_IRQn, 4);
 	NVIC_EnableIRQ(I2C1_EV_IRQn);
 
   I2C_Cmd(II_I2C, ENABLE);
@@ -65,75 +65,94 @@ void II::InitializeControlInterface() {
 void II::Init(Modulations* modulations) {
   modulations_ = modulations;
 
-  next_buffer_byte_ = 0;
+  i2c_buffer_next_byte_ = 0;
 
   InitializeGPIO();
   InitializeControlInterface();
 }
 
+// i2c interrupt handler
 bool II::IRQHandler() {
   bool returnval = false;
   if (I2C_GetITStatus(II_I2C, I2C_IT_ADDR) == SET) {
     I2C_ITConfig(II_I2C, I2C_IT_RXI | I2C_IT_TXI | I2C_IT_STOPI, ENABLE);
-    ProcessBuffer();
-    returnval = true;
+    
+    for (uint8_t i = 0; i < i2c_buffer_next_byte_; ++i)
+    {
+		  process_buffer_[i] = i2c_buffer_[i];
+    }
+    uint8_t bytes_in_buffer = i2c_buffer_next_byte_;
+    i2c_buffer_next_byte_ = 0;
+    ProcessBuffer(bytes_in_buffer);
+    
     I2C_ClearITPendingBit(II_I2C, I2C_IT_ADDR);
+    returnval = true;
   }
   if (I2C_GetITStatus(II_I2C, I2C_IT_RXNE) == SET) {
-    if(next_buffer_byte_ < I2C_BUFFER_BYTES) {
-      buffer_[next_buffer_byte_] = I2C_ReceiveData(II_I2C);
-      next_buffer_byte_++;
+    if(i2c_buffer_next_byte_ < I2C_BUFFER_BYTES) {
+      i2c_buffer_[i2c_buffer_next_byte_] = I2C_ReceiveData(II_I2C);
+      i2c_buffer_next_byte_++;
     }
 	}
   if (I2C_GetITStatus(II_I2C, I2C_IT_STOPF) == SET) {
-    ProcessBuffer();
-    returnval = true;
 
-		I2C_ClearITPendingBit(II_I2C, I2C_IT_STOPF);
+    for (uint8_t i = 0; i < i2c_buffer_next_byte_; ++i)
+    {
+		  process_buffer_[i] = i2c_buffer_[i];
+    }
+    uint8_t bytes_in_buffer = i2c_buffer_next_byte_;
+    i2c_buffer_next_byte_ = 0;
+    ProcessBuffer(bytes_in_buffer);
+
+    I2C_ClearITPendingBit(II_I2C, I2C_IT_STOPF);
     I2C_ITConfig(II_I2C, I2C_IT_RXI | I2C_IT_TXI | I2C_IT_STOPI, DISABLE);
-
-		I2C_Cmd(II_I2C, DISABLE);
+    I2C_Cmd(II_I2C, DISABLE);
 		I2C_ClearITPendingBit(II_I2C, I2C_IT_TXIS);
 		I2C_Cmd(II_I2C, ENABLE);
-
 		I2C_ITConfig(II_I2C, I2C_IT_ADDRI, ENABLE);
+
+    returnval = true;
   }
 
   return returnval;
 }
 
-void II::ProcessBuffer() {
-  if(next_buffer_byte_ == 0) {
+// Process a received i2c message
+void II::ProcessBuffer(uint8_t num_bytes) {
+  if(num_bytes == 0) {
     return;
   }
   
   // look for commands with required byte length
-  if(buffer_[0] == II_CTL && next_buffer_byte_ == 3) {
-    uint8_t ctrl = buffer_[1];
-    bool value = buffer_[2] == 0x01;
-    if(ctrl == II_CTL_ALL) {
-      for(int i = II_CTL_ALL+1; i < II_CTL_LAST; i++) {
-        controls_[i].enabled = value;
-      }
-    } else if(ctrl > II_CTL_ALL && ctrl < II_CTL_LAST) {
-      controls_[ctrl].enabled = value;
+  if(process_buffer_[0] == II_CTL) {
+    controls_[II_CTL_TRIGGER].enabled = (process_buffer_[1] & II_CTLFLAG_TRIGGER) == II_CTLFLAG_TRIGGER;
+    controls_[II_CTL_LEVEL].enabled = (process_buffer_[1] & II_CTLFLAG_LEVEL) == II_CTLFLAG_LEVEL;
+    controls_[II_CTL_VOCT].enabled = (process_buffer_[1] & II_CTLFLAG_VOCT) == II_CTLFLAG_VOCT;
+  }
+  else if(process_buffer_[0] == II_TRIGGER) {
+    controls_[II_CTL_TRIGGER].received = true;
+
+    if(num_bytes == 3) {
+      uint16_t val = (process_buffer_[1] << 8) + process_buffer_[2];
+      controls_[II_CTL_VOCT].value = static_cast<float>(val) * (120.0f / 16384.0f);
     }
   }
-  else if(buffer_[0] == II_TRIGGER) {
-    controls_[II_CTL_TRIGGER].received = true;
-  }
-  else if(buffer_[0] == II_LEVEL && next_buffer_byte_ == 3) {
-    uint16_t val = (buffer_[1] << 8) + buffer_[2];
+  else if(process_buffer_[0] == II_LEVEL && num_bytes >= 3) {
+    uint16_t val = (process_buffer_[1] << 8) + process_buffer_[2];
     controls_[II_CTL_LEVEL].value = static_cast<float>(val) / 16384.0f;
-  }  
-  else if(buffer_[0] == II_VOCT && next_buffer_byte_ == 3) {
-    uint16_t val = (buffer_[1] << 8) + buffer_[2];
+
+    if(num_bytes == 5) {
+      uint16_t val = (process_buffer_[3] << 8) + process_buffer_[4];
+      controls_[II_CTL_VOCT].value = static_cast<float>(val) * (120.0f / 16384.0f);      
+    }
+  }
+  else if(process_buffer_[0] == II_VOCT && num_bytes == 3) {
+    uint16_t val = (process_buffer_[1] << 8) + process_buffer_[2];
     controls_[II_CTL_VOCT].value = static_cast<float>(val) * (120.0f / 16384.0f);
   }
-
-  next_buffer_byte_ = 0;
 }
 
+// Update modulations with the latest received values
 void II::Poll() {
   if(controls_[II_CTL_TRIGGER].enabled) {
     modulations_->trigger_patched = true;

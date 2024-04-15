@@ -5,7 +5,7 @@
 #include "stm32f37x.h"
 #include "plaits/dsp/voice.h"
 
-#define I2C_BUFFER_BYTES 4
+#define I2C_BUFFER_BYTES 5
 
 namespace plaits {
 
@@ -20,13 +20,15 @@ enum Cmds {
 
 // Control Targets
 enum Ctrls {
-  II_CTL_NA,
-  II_CTL_ALL,
   II_CTL_TRIGGER,
   II_CTL_LEVEL,
   II_CTL_VOCT,
   II_CTL_LAST
 };
+
+#define II_CTLFLAG_TRIGGER  1
+#define II_CTLFLAG_LEVEL    2
+#define II_CTLFLAG_VOCT     4
 
 struct IIControl {
   bool enabled;
@@ -41,17 +43,18 @@ class II {
   
   void Init(Modulations* modulations);
   bool IRQHandler();
-  void ProcessBuffer();
   void Poll();
 
  private:
   void InitializeGPIO();
   void InitializeControlInterface();
+  void ProcessBuffer(uint8_t num_bytes);
 
   Modulations* modulations_;
 
-  uint8_t next_buffer_byte_;
-  uint8_t buffer_[I2C_BUFFER_BYTES];
+  uint8_t process_buffer_[I2C_BUFFER_BYTES];
+  uint8_t i2c_buffer_next_byte_;
+  uint8_t i2c_buffer_[I2C_BUFFER_BYTES];
 
   IIControl controls_[II_CTL_LAST];
 

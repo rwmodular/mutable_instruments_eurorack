@@ -17,33 +17,30 @@ The bottom of the 4 pins is ground, the 2 pins are SDA at the top and SCL at the
 Plaits is given the i2c address 0x49
 
 An i2c command should consist of the address for Plaits, the command number and any parameters required by the command
-e.g. 0x49 0x1 0x2 0x1 (set control of trigger on) or 0x49 0x2 (send a trigger).
+e.g. 0x49 0x1 0x5 (set control of trigger and V/Oct) or 0x49 0x2 (send a trigger).
 
 **Control**\
-0x1 &lt;Feature&gt; &lt;0x1 (on) / 0x0 (off)&gt;\
-Takes control of a feature over i2c - acts as if a cable is connected to Plaits and ignores any CV sent to it.
+0x1 &lt;Feature Mask &gt;\
+Takes control of features over i2c - acts as if a cable is connected to Plaits and ignores any CV sent to it.\
+Set the bits for the features you want to control e.g. 00000110 / 0x6 for level and V/Oct
 
 Features:\
-0x1 - All listed\
-0x2 - Trigger\
-0x3 - Level\
+0x1 - Trigger\
+0x2 - Level\
 0x4 - V/Oct
 
 **Trigger**\
-0x2\
-Sends a trigger
+0x2 [Pitch MSB] [Pitch LSB]\
+Sends a trigger with optional pitch
 
 **Level**\
-0x3 &lt;MSB&gt; &lt;LSB&gt;\
-Sets the level 0 - 16384
+0x3 &lt;MSB&gt; &lt;LSB&gt; [Pitch MSB] [Pitch LSB]\
+Sets the level 0 - 16384  with optional pitch (0 - 16384 / 0v - 10v)
 
 **V/Oct**\
 0x4 &lt;MSB&gt; &lt;LSB&gt;\
 Sets the pitch 0 - 16384 / 0v - 10v
 
-### Issues
-- You may need to add a short delay (~10ms?) between Control commands
-- Some of the most recent (orange) engines don't seem to work yet
-
 ### History
-*2024-04-12 - Initial Version*
+*2024-04-12 - Initial Version*\
+*2024-04-15 - Require less i2c messages - single control message to set all/any features, trigger and level have optional pitch*
